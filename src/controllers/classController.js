@@ -5,7 +5,7 @@
 const Class = require('../models/Class');
 const Student = require('../models/Student');
 const MonthlyPayment = require('../models/MonthlyPayment');
-const Subscription = require('../models/Subscription');
+// const Subscription = require('../models/Subscription');
 
 const PLAN_LIMITS = {
   free: { classes: 1, students: 30 },

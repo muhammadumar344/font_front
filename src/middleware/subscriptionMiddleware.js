@@ -2,7 +2,7 @@
 // FILE: src/middleware/subscriptionMiddleware.js
 // ============================================================================
 
-const Subscription = require('../models/Subscription');
+// const Subscription = require('../models/Subscription');
 
 const subscriptionMiddleware = async (req, res, next) => {
   try {

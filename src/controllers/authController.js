@@ -1,9 +1,10 @@
+// src/controllers/authController.js
 const jwt = require('jsonwebtoken');
-const Teacher = require('../models/Teacher');
 const Admin = require('../models/Admin');
+const Teacher = require('../models/Teacher');
 
 const generateToken = (payload) => {
-  return jwt.sign(payload, process.env.JWT_SECRET_KEY, { expiresIn: '30d' });
+  return jwt.sign(payload, process.env.JWT_SECRET_KEY || 'secret-key', { expiresIn: '30d' });
 };
 
 exports.adminLogin = async (req, res) => {
@@ -48,7 +49,6 @@ exports.teacherLogin = async (req, res) => {
       return res.status(401).json({ error: 'Email yoki parol noto\'g\'ri' });
     }
 
-    // YANGI: Teacher self deactivate qilganmi?
     if (teacher.selfDeactivated) {
       return res.status(403).json({
         error: 'self_deactivated',
@@ -65,20 +65,22 @@ exports.teacherLogin = async (req, res) => {
       return res.status(401).json({ error: 'Email yoki parol noto\'g\'ri' });
     }
 
-    // YANGI: Subscription tekshirish (TEACHER UCHUN!)
-    if (!teacher.subscriptionIsActive || teacher.isSubscriptionExpired()) {
+    const now = new Date();
+    const isExpired = teacher.subscriptionExpiryDate < now;
+
+    if (!teacher.subscriptionIsActive || isExpired) {
       return res.status(403).json({
         error: 'subscription_expired',
         message: 'Saytdan foydalanish vaqtingiz tugadi. Iltimos to\'lov qiling',
-        daysLeft: teacher.daysLeftInSubscription(),
+        daysLeft: 0,
       });
     }
 
-    const token = generateToken({ id: teacher._id, email: teacher.email, role: 'teacher' });
+    const token = generateToken({ id: teacher._id, email: teacher.email, role: 'teacher', plan: teacher.plan });
 
     res.json({
       token,
-      user: { id: teacher._id, name: teacher.name, email: teacher.email, role: 'teacher' },
+      user: { id: teacher._id, name: teacher.name, email: teacher.email, role: 'teacher', plan: teacher.plan },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

@@ -1,18 +1,16 @@
+// src/controllers/teacherController.js
 const Class = require('../models/Class');
-const Student = require('../models/Student');
 const Teacher = require('../models/Teacher');
+const Student = require('../models/Student');
 const MonthlyPayment = require('../models/MonthlyPayment');
 const Expense = require('../models/Expense');
 
 const PLAN_LIMITS = {
-  free:  { classes: 1,   students: 30  },
-  plus:  { classes: 4,   students: 100 },
-  pro:   { classes: Infinity, students: Infinity },
+  free: { classes: 1, students: 30 },
+  plus: { classes: 4, students: 100 },
+  pro: { classes: Infinity, students: Infinity },
 };
 
-// ========================================
-// YANGI: TEACHER O'ZI SINFLARNI YARATADI
-// ========================================
 exports.createClass = async (req, res) => {
   try {
     const teacherId = req.user.id;
@@ -22,13 +20,11 @@ exports.createClass = async (req, res) => {
       return res.status(400).json({ error: 'Sinf nomi majburiy' });
     }
 
-    // Teacher ni topadi va uning planini oladi
     const teacher = await Teacher.findById(teacherId);
     if (!teacher) {
       return res.status(404).json({ error: 'Teacher topilmadi' });
     }
 
-    // Plan limitini tekshirish
     const limit = PLAN_LIMITS[teacher.plan];
     const classCount = await Class.countDocuments({ teacher: teacherId });
 
@@ -40,16 +36,14 @@ exports.createClass = async (req, res) => {
       });
     }
 
-    // Yangi sinf yaratish
     const newClass = new Class({
       name: name.trim(),
       description: description || '',
       teacher: teacherId,
-      plan: teacher.plan, // Teacher planidan olinadi
+      plan: teacher.plan,
     });
 
     await newClass.save();
-    await newClass.populate('teacher', 'name email');
 
     res.status(201).json({
       message: 'Sinf muvaffaqiyatli yaratildi',
@@ -57,8 +51,9 @@ exports.createClass = async (req, res) => {
         _id: newClass._id,
         name: newClass.name,
         description: newClass.description,
-        teacher: newClass.teacher,
         plan: newClass.plan,
+        studentCount: 0,
+        paidPayments: 0,
       },
     });
   } catch (err) {
@@ -66,15 +61,11 @@ exports.createClass = async (req, res) => {
   }
 };
 
-// ====================================
-// TEACHER O'Z SINFLARINI KO'RADI
-// ====================================
 exports.getMyClasses = async (req, res) => {
   try {
     const teacherId = req.user.id;
 
-    const classes = await Class.find({ teacher: teacherId })
-      .populate('teacher', 'name email plan');
+    const classes = await Class.find({ teacher: teacherId }).sort({ createdAt: -1 });
 
     const classesWithStats = await Promise.all(
       classes.map(async (cls) => {
@@ -107,9 +98,6 @@ exports.getMyClasses = async (req, res) => {
   }
 };
 
-// ====================================
-// TEACHER SINF TAHRIRLAYDI
-// ====================================
 exports.updateMyClass = async (req, res) => {
   try {
     const teacherId = req.user.id;
@@ -122,7 +110,7 @@ exports.updateMyClass = async (req, res) => {
     }
 
     if (name) cls.name = name.trim();
-    if (description) cls.description = description;
+    if (description !== undefined) cls.description = description;
 
     await cls.save();
 
@@ -135,9 +123,6 @@ exports.updateMyClass = async (req, res) => {
   }
 };
 
-// ====================================
-// TEACHER SINF O'CHIRADI
-// ====================================
 exports.deleteMyClass = async (req, res) => {
   try {
     const teacherId = req.user.id;
@@ -148,7 +133,6 @@ exports.deleteMyClass = async (req, res) => {
       return res.status(404).json({ error: 'Sinf topilmadi yoki ruxsat yo\'q' });
     }
 
-    // Cascade o'chirish
     await MonthlyPayment.deleteMany({ class: classId });
     await Expense.deleteMany({ class: classId });
     await Student.deleteMany({ class: classId });
@@ -166,9 +150,6 @@ exports.deleteMyClass = async (req, res) => {
   }
 };
 
-// ====================================
-// YANGI: DEFAULT SUMMA O'RNATISH
-// ====================================
 exports.setDefaultAmount = async (req, res) => {
   try {
     const { classId } = req.params;
@@ -201,9 +182,6 @@ exports.setDefaultAmount = async (req, res) => {
   }
 };
 
-// ====================================
-// YANGI: TEACHER DASHBOARD
-// ====================================
 exports.getTeacherDashboard = async (req, res) => {
   try {
     const teacherId = req.user.id;
@@ -216,11 +194,9 @@ exports.getTeacherDashboard = async (req, res) => {
       return res.status(404).json({ error: 'Teacher topilmadi' });
     }
 
-    // Barcha sinflarini topadi
     const classes = await Class.find({ teacher: teacherId });
     const classIds = classes.map(c => c._id);
 
-    // Statistika hisoblash
     const totalStudents = await Student.countDocuments({
       class: { $in: classIds },
       isActive: true,
@@ -239,7 +215,6 @@ exports.getTeacherDashboard = async (req, res) => {
 
     const balance = totalCollectedAllTime - totalExpensesAllTime;
 
-    // Joriy oy
     const currentMonthPayments = await MonthlyPayment.find({
       class: { $in: classIds },
       month: currentMonth,
@@ -269,17 +244,11 @@ exports.getTeacherDashboard = async (req, res) => {
       subscription: {
         plan: teacher.plan,
         expiryDate: teacher.subscriptionExpiryDate,
-        daysLeft: teacher.daysLeftInSubscription(),
-        isExpired: teacher.isSubscriptionExpired(),
         isActive: teacher.subscriptionIsActive,
       },
       classes: {
         total: classes.length,
-        list: classes.map(c => ({
-          _id: c._id,
-          name: c.name,
-          plan: c.plan,
-        })),
+        list: classes,
       },
       students: {
         total: totalStudents,
@@ -305,9 +274,6 @@ exports.getTeacherDashboard = async (req, res) => {
   }
 };
 
-// ====================================
-// YANGI: REKLAM PLAN O'ZIGA TANLAYDI
-// ====================================
 exports.selectPlan = async (req, res) => {
   try {
     const teacherId = req.user.id;
@@ -322,7 +288,6 @@ exports.selectPlan = async (req, res) => {
       return res.status(404).json({ error: 'Teacher topilmadi' });
     }
 
-    // Eski plan sinflarini tekshirish (limit)
     const classCount = await Class.countDocuments({ teacher: teacherId });
     const limit = PLAN_LIMITS[plan];
 
@@ -333,10 +298,8 @@ exports.selectPlan = async (req, res) => {
     }
 
     teacher.plan = plan;
-    // MUHIM: Subscription admin tomonidan belgilanadi, bu yerda yo'q!
     await teacher.save();
 
-    // Barcha sinflarning planini yangilash
     await Class.updateMany({ teacher: teacherId }, { plan });
 
     res.json({

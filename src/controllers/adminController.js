@@ -1,24 +1,86 @@
+// src/controllers/adminController.js
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const Admin = require('../models/Admin');
 const Teacher = require('../models/Teacher');
+const Class = require('../models/Class');
+const Student = require('../models/Student');
+const MonthlyPayment = require('../models/MonthlyPayment');
+const Expense = require('../models/Expense');
 
-// ====================================
-// ADMIN TEACHER YARATADI
-// ====================================
-exports.createTeacher = async (req, res) => {
+exports.createAdmin = async (req, res) => {
   try {
-    const { name, email, password, phone } = req.body;
+    const existing = await Admin.findOne();
+    if (existing) {
+      return res.status(400).json({ error: 'Admin allaqachon mavjud' });
+    }
 
-    if (!name || !name.trim()) {
+    const { name, email, password } = req.body;
+
+    if (!name || name.trim() === '') {
       return res.status(400).json({ error: 'Ism majburiy' });
     }
 
-    if (!email || !email.trim()) {
+    if (!email || email.trim() === '') {
       return res.status(400).json({ error: 'Email majburiy' });
     }
 
     if (!password || password.length < 6) {
-      return res.status(400).json({ error: 'Parol kamita 6 belgidan iborat' });
+      return res.status(400).json({ error: 'Parol kamita 6 belgidan iborat bo\'lishi kerak' });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: 'Email to\'g\'ri formatda emas' });
+    }
+
+    const admin = new Admin({
+      name: name.trim(),
+      email: email.toLowerCase(),
+      password,
+    });
+
+    await admin.save();
+
+    const token = jwt.sign(
+      { id: admin._id, email: admin.email, role: 'admin' },
+      process.env.JWT_SECRET_KEY || 'admin-secret-key',
+      { expiresIn: '30d' }
+    );
+
+    res.status(201).json({
+      message: 'Admin muvaffaqiyatli yaratildi',
+      token,
+      admin: {
+        id: admin._id,
+        name: admin.name,
+        email: admin.email,
+        role: admin.role,
+      },
+    });
+  } catch (err) {
+    if (err.code === 11000) {
+      return res.status(400).json({ error: 'Bu email allaqachon ro\'yxatdan o\'tgan' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.createTeacher = async (req, res) => {
+  try {
+    const { name, email, password, phone } = req.body;
+
+    if (!name || name.trim() === '') {
+      return res.status(400).json({ error: 'Ism majburiy' });
+    }
+
+    if (!email || email.trim() === '') {
+      return res.status(400).json({ error: 'Email majburiy' });
+    }
+
+    if (!password || password.length < 6) {
+      return res.status(400).json({ error: 'Parol kamita 6 belgidan iborat bo\'lishi kerak' });
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -31,14 +93,17 @@ exports.createTeacher = async (req, res) => {
       return res.status(400).json({ error: 'Bu email allaqachon ro\'yxatdan o\'tgan' });
     }
 
+    const now = new Date();
+    const expiryDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
     const teacher = new Teacher({
       name: name.trim(),
       email: email.toLowerCase(),
       password,
       phone: phone || '',
-      plan: 'free', // Default plan
-      subscriptionStartDate: new Date(),
-      subscriptionExpiryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 kun
+      plan: 'free',
+      subscriptionStartDate: now,
+      subscriptionExpiryDate: expiryDate,
       subscriptionIsActive: true,
       createdByAdmin: true,
     });
@@ -48,7 +113,7 @@ exports.createTeacher = async (req, res) => {
     res.status(201).json({
       message: 'Teacher muvaffaqiyatli yaratildi',
       teacher: {
-        _id: teacher._id,
+        id: teacher._id,
         name: teacher.name,
         email: teacher.email,
         phone: teacher.phone,
@@ -63,9 +128,102 @@ exports.createTeacher = async (req, res) => {
   }
 };
 
-// ====================================
-// YANGI: ADMIN TEACHER SUBSCRIPTION BELGILAYDI
-// ====================================
+exports.getAllTeachers = async (req, res) => {
+  try {
+    const teachers = await Teacher.find().select('-password').sort({ createdAt: -1 });
+
+    const teachersWithStats = await Promise.all(
+      teachers.map(async (teacher) => {
+        const classCount = await Class.countDocuments({ teacher: teacher._id });
+        const classIds = await Class.find({ teacher: teacher._id }).select('_id');
+        const studentCount = await Student.countDocuments({
+          class: { $in: classIds }
+        });
+
+        return {
+          _id: teacher._id,
+          name: teacher.name,
+          email: teacher.email,
+          phone: teacher.phone,
+          plan: teacher.plan,
+          subscriptionExpiryDate: teacher.subscriptionExpiryDate,
+          daysLeft: teacher.daysLeftInSubscription ? teacher.daysLeftInSubscription() : 0,
+          isSubscriptionActive: teacher.subscriptionIsActive && !teacher.isSubscriptionExpired(),
+          classCount,
+          studentCount,
+          createdAt: teacher.createdAt,
+        };
+      })
+    );
+
+    res.json({
+      total: teachersWithStats.length,
+      teachers: teachersWithStats,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.deleteTeacher = async (req, res) => {
+  try {
+    const { teacherId } = req.params;
+
+    const teacher = await Teacher.findByIdAndDelete(teacherId);
+    if (!teacher) {
+      return res.status(404).json({ error: 'Teacher topilmadi' });
+    }
+
+    const classes = await Class.find({ teacher: teacherId });
+    const classIds = classes.map(c => c._id);
+
+    await MonthlyPayment.deleteMany({ class: { $in: classIds } });
+    await Expense.deleteMany({ class: { $in: classIds } });
+    await Student.deleteMany({ class: { $in: classIds } });
+    await Class.deleteMany({ teacher: teacherId });
+
+    res.json({
+      message: 'Teacher va barcha sinflar o\'chirildi',
+      deletedTeacher: {
+        _id: teacher._id,
+        name: teacher.name,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.resetTeacherPassword = async (req, res) => {
+  try {
+    const { teacherId } = req.params;
+    const { newPassword } = req.body;
+
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ error: 'Parol kamita 6 belgidan iborat bo\'lishi kerak' });
+    }
+
+    const teacher = await Teacher.findById(teacherId);
+    if (!teacher) {
+      return res.status(404).json({ error: 'Teacher topilmadi' });
+    }
+
+    teacher.password = newPassword;
+    await teacher.save();
+
+    res.json({
+      message: 'Parol yangilandi',
+      teacher: {
+        _id: teacher._id,
+        name: teacher.name,
+        email: teacher.email,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 exports.setTeacherSubscription = async (req, res) => {
   try {
     const { teacherId } = req.params;
@@ -91,8 +249,9 @@ exports.setTeacherSubscription = async (req, res) => {
     const now = new Date();
     let newExpiryDate;
 
-    // Eski subscription o'tmagan bo'lsa ustiga qo'sh
-    if (!teacher.isSubscriptionExpired()) {
+    const isExpired = teacher.subscriptionExpiryDate < now;
+
+    if (!isExpired) {
       newExpiryDate = new Date(teacher.subscriptionExpiryDate);
     } else {
       newExpiryDate = new Date(now);
@@ -107,7 +266,6 @@ exports.setTeacherSubscription = async (req, res) => {
 
     await teacher.save();
 
-    // Teacher barcha sinflarining planini yangilash
     await Class.updateMany({ teacher: teacherId }, { plan });
 
     res.json({
@@ -117,7 +275,7 @@ exports.setTeacherSubscription = async (req, res) => {
         name: teacher.name,
         plan: teacher.plan,
         subscriptionExpiryDate: teacher.subscriptionExpiryDate,
-        daysLeft: teacher.daysLeftInSubscription(),
+        daysLeft: teacher.daysLeftInSubscription ? teacher.daysLeftInSubscription() : 0,
       },
     });
   } catch (err) {
@@ -125,114 +283,6 @@ exports.setTeacherSubscription = async (req, res) => {
   }
 };
 
-// ====================================
-// YANGI: ADMIN BARCHA TEACHERS VA ULARGA TEGISHLI CLASSLARNI KO'RADI
-// ====================================
-exports.getAllTeachers = async (req, res) => {
-  try {
-    const teachers = await Teacher.find().select('-password').sort({ createdAt: -1 });
-
-    const teachersWithStats = await Promise.all(
-      teachers.map(async (teacher) => {
-        const classCount = await Class.countDocuments({ teacher: teacher._id });
-        const studentCount = await Student.countDocuments({
-          class: { $in: await Class.find({ teacher: teacher._id }).select('_id') }
-        });
-
-        return {
-          _id: teacher._id,
-          name: teacher.name,
-          email: teacher.email,
-          phone: teacher.phone,
-          plan: teacher.plan,
-          subscriptionExpiryDate: teacher.subscriptionExpiryDate,
-          daysLeft: teacher.daysLeftInSubscription(),
-          isSubscriptionActive: teacher.subscriptionIsActive && !teacher.isSubscriptionExpired(),
-          classCount,
-          studentCount,
-          createdAt: teacher.createdAt,
-        };
-      })
-    );
-
-    res.json({
-      total: teachersWithStats.length,
-      teachers: teachersWithStats,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-};
-
-// ====================================
-// ADMIN TEACHER O'CHIRADI
-// ====================================
-exports.deleteTeacher = async (req, res) => {
-  try {
-    const { teacherId } = req.params;
-
-    const teacher = await Teacher.findByIdAndDelete(teacherId);
-    if (!teacher) {
-      return res.status(404).json({ error: 'Teacher topilmadi' });
-    }
-
-    // Teacher ning barcha sinflari o'chiriladi
-    const classes = await Class.find({ teacher: teacherId });
-    const classIds = classes.map(c => c._id);
-
-    await MonthlyPayment.deleteMany({ class: { $in: classIds } });
-    await Expense.deleteMany({ class: { $in: classIds } });
-    await Student.deleteMany({ class: { $in: classIds } });
-    await Class.deleteMany({ teacher: teacherId });
-
-    res.json({
-      message: 'Teacher va uning barcha sinflar o\'chirildi',
-      deletedTeacher: {
-        _id: teacher._id,
-        name: teacher.name,
-      },
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-};
-
-// ====================================
-// ADMIN PAROL RESET
-// ====================================
-exports.resetTeacherPassword = async (req, res) => {
-  try {
-    const { teacherId } = req.params;
-    const { newPassword } = req.body;
-
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ error: 'Parol kamita 6 belgidan iborat' });
-    }
-
-    const teacher = await Teacher.findById(teacherId);
-    if (!teacher) {
-      return res.status(404).json({ error: 'Teacher topilmadi' });
-    }
-
-    teacher.password = newPassword;
-    await teacher.save();
-
-    res.json({
-      message: 'Parol yangilandi',
-      teacher: {
-        _id: teacher._id,
-        name: teacher.name,
-        email: teacher.email,
-      },
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-};
-
-// ====================================
-// ADMIN DASHBOARD
-// ====================================
 exports.getDashboard = async (req, res) => {
   try {
     const totalTeachers = await Teacher.countDocuments();
@@ -244,8 +294,9 @@ exports.getDashboard = async (req, res) => {
     const teachersWithStats = await Promise.all(
       teachers.map(async (teacher) => {
         const classCount = await Class.countDocuments({ teacher: teacher._id });
+        const classIds = await Class.find({ teacher: teacher._id }).select('_id');
         const studentCount = await Student.countDocuments({
-          class: { $in: await Class.find({ teacher: teacher._id }).select('_id') }
+          class: { $in: classIds }
         });
 
         return {
@@ -254,7 +305,7 @@ exports.getDashboard = async (req, res) => {
           email: teacher.email,
           plan: teacher.plan,
           subscriptionExpiryDate: teacher.subscriptionExpiryDate,
-          daysLeft: teacher.daysLeftInSubscription(),
+          daysLeft: teacher.daysLeftInSubscription ? teacher.daysLeftInSubscription() : 0,
           isSubscriptionActive: teacher.subscriptionIsActive && !teacher.isSubscriptionExpired(),
           classCount,
           studentCount,

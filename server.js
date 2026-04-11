@@ -22,7 +22,7 @@ app.use('/api/classes', require('./src/routes/classes'));
 app.use('/api/students', require('./src/routes/students'));
 app.use('/api/payments', require('./src/routes/payments'));
 app.use('/api/expenses', require('./src/routes/expenses'));
-app.use('/api/subscription', require('./src/routes/subscription'));
+// app.use('/api/subscription', require('./src/routes/subscription'));
 
 // Health check
 app.get('/api/health', (req, res) => {
