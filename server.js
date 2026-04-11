@@ -1,7 +1,4 @@
-// ============================================================================
-// FILE: server.js (TO'LIQQA YANGILANG)
-// ============================================================================
-
+// server.js
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -9,66 +6,46 @@ const cors = require('cors');
 
 const app = express();
 
-// ✅ MUHIM: JSON middleware BIRINCHI bo'lishi kerak
-app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(cors({
+  origin: ['http://localhost:3000', 'http://localhost:5173', 'https://font-front.onrender.com'],
+  credentials: true
+}));
+app.use(express.json());
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-// Routes
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', message: 'Server ishlayapti' });
+});
+
 app.use('/api/auth', require('./src/routes/auth'));
 app.use('/api/admin', require('./src/routes/admin'));
 app.use('/api/teacher', require('./src/routes/teacher'));
-app.use('/api/classes', require('./src/routes/classes'));
-app.use('/api/students', require('./src/routes/students'));
-app.use('/api/payments', require('./src/routes/payments'));
-app.use('/api/expenses', require('./src/routes/expenses'));
-// app.use('/api/subscription', require('./src/routes/subscription'));
 
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'Server is running', timestamp: new Date() });
-});
-
-// 404 handler
 app.use((req, res) => {
-  res.status(404).json({ error: 'Endpoint topilmadi' });
+  res.status(404).json({ error: 'Endpoint topilmadi: ' + req.path });
 });
 
-// Error handler
 app.use((err, req, res, next) => {
-  console.error('Error:', err);
-
-  if (err.name === 'ValidationError') {
-    return res.status(400).json({ error: err.message });
-  }
-
-  if (err.name === 'MongoServerError' && err.code === 11000) {
-    return res.status(400).json({ error: 'Duplikat: bu email allaqachon ro\'yxatdan o\'tgan' });
-  }
-
-  if (err.name === 'JsonWebTokenError') {
-    return res.status(401).json({ error: 'Token yaroqsiz' });
-  }
-
-  if (err.name === 'TokenExpiredError') {
-    return res.status(401).json({ error: 'Token muddati o\'tgan' });
-  }
-
-  res.status(500).json({ error: err.message || 'Server xatosi' });
+  console.error('❌ Server xatosi:', err);
+  res.status(500).json({
+    error: 'Server xatosi',
+    message: err.message
+  });
 });
 
 const PORT = process.env.PORT || 5000;
-const MONGO_URI = process.env.MONGO_URI;
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/school_fond';
 
 mongoose
   .connect(MONGO_URI, {
     useNewUrlParser: true,
-    useUnifiedTopology: true,
+    useUnifiedTopology: true
   })
   .then(() => {
     console.log('✅ MongoDB ulandi');
     app.listen(PORT, () => {
       console.log(`🚀 Server http://localhost:${PORT} da ishga tushdi`);
+      console.log(`🏥 Health check: http://localhost:${PORT}/health`);
     });
   })
   .catch((err) => {
