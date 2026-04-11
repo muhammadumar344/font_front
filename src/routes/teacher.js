@@ -1,29 +1,30 @@
-// src/routes/teacher.js
-const express = require('express');
-const router = express.Router();
-const teacherController = require('../controllers/teacherController');
-const authMiddleware = require('../middleware/authMiddleware');
-const subscriptionMiddleware = require('../middleware/subscriptionMiddleware');
+const express = require('express')
+const router = express.Router()
+const teacherController = require('../controllers/teacherController')
+const expenseController = require('../controllers/expenseController')
+const authMiddleware = require('../middleware/authMiddleware')
+const subscriptionMiddleware = require('../middleware/subscriptionMiddleware')
 
-router.use(authMiddleware);
+router.use(authMiddleware)
 
-// Setup
-router.get('/amount-check', teacherController.checkAmountConfigured);
-router.post('/set-amount', teacherController.setDefaultAmount);
+// ─── SETUP ────────────────────────────────────────────────────────────────
+router.get('/amount-check', teacherController.checkAmountConfigured)
+router.post('/set-amount', teacherController.setDefaultAmount)
 
-// Dashboard
-router.get('/dashboard', subscriptionMiddleware, teacherController.getTeacherDashboard);
+// ─── DASHBOARD ────────────────────────────────────────────────────────────
+router.get('/dashboard', subscriptionMiddleware, teacherController.getTeacherDashboard)
 
-// Report
-router.get('/report', subscriptionMiddleware, teacherController.getMyClassReport);
+// ─── HISOBOT ─────────────────────────────────────────────────────────────
+router.get('/report', subscriptionMiddleware, teacherController.getMyClassReport)
 
-// Payments
-router.post('/payments/create', subscriptionMiddleware, teacherController.createMonthlyPaymentsForMyClass);
-router.put('/payments/:paymentId/status', subscriptionMiddleware, teacherController.updateMyPaymentStatus);
+// ─── TO'LOVLAR ────────────────────────────────────────────────────────────
+router.post('/payments/create', subscriptionMiddleware, teacherController.createMonthlyPaymentsForMyClass)
+router.put('/payments/:paymentId/status', subscriptionMiddleware, teacherController.updateMyPaymentStatus)
 
-// Expenses
-router.post('/expenses', subscriptionMiddleware, teacherController.createExpenseForTeacher);
-router.get('/expenses', subscriptionMiddleware, teacherController.getTeacherExpenses);
-router.delete('/expenses/:expenseId', subscriptionMiddleware, teacherController.deleteTeacherExpense);
+// ─── XARAJATLAR ───────────────────────────────────────────────────────────
+router.post('/expenses', subscriptionMiddleware, expenseController.createExpense)
+router.get('/expenses', subscriptionMiddleware, expenseController.getExpensesByMonth)
+router.get('/expenses/yearly', subscriptionMiddleware, expenseController.getYearlySummary)
+router.delete('/expenses/:expenseId', subscriptionMiddleware, expenseController.deleteExpense)
 
-module.exports = router;
+module.exports = router
