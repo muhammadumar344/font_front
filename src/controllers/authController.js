@@ -1,13 +1,9 @@
-// ============================================================================
-// FILE: src/controllers/authController.js
-// ============================================================================
-
 const jwt = require('jsonwebtoken');
-const Admin = require('../models/Admin');
 const Teacher = require('../models/Teacher');
+const Admin = require('../models/Admin');
 
 const generateToken = (payload) => {
-  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '24h' });
+  return jwt.sign(payload, process.env.JWT_SECRET_KEY, { expiresIn: '30d' });
 };
 
 exports.adminLogin = async (req, res) => {
@@ -18,8 +14,7 @@ exports.adminLogin = async (req, res) => {
       return res.status(400).json({ error: 'Email va parol majburiy' });
     }
 
-    const admin = await Admin.findOne({ email: email.toLowerCase() }).select('+password');
-
+    const admin = await Admin.findOne({ email }).select('+password');
     if (!admin) {
       return res.status(401).json({ error: 'Email yoki parol noto\'g\'ri' });
     }
@@ -29,19 +24,11 @@ exports.adminLogin = async (req, res) => {
       return res.status(401).json({ error: 'Email yoki parol noto\'g\'ri' });
     }
 
-    await admin.updateLastLogin();
-
     const token = generateToken({ id: admin._id, email: admin.email, role: 'admin' });
 
     res.json({
-      message: 'Muvaffaqiyatli kirish',
       token,
-      user: {
-        id: admin._id,
-        name: admin.name,
-        email: admin.email,
-        role: 'admin',
-      },
+      user: { id: admin._id, name: admin.name, email: admin.email, role: 'admin' },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -56,14 +43,21 @@ exports.teacherLogin = async (req, res) => {
       return res.status(400).json({ error: 'Email va parol majburiy' });
     }
 
-    const teacher = await Teacher.findOne({ email: email.toLowerCase() }).select('+password');
-
+    const teacher = await Teacher.findOne({ email }).select('+password');
     if (!teacher) {
       return res.status(401).json({ error: 'Email yoki parol noto\'g\'ri' });
     }
 
+    // YANGI: Teacher self deactivate qilganmi?
+    if (teacher.selfDeactivated) {
+      return res.status(403).json({
+        error: 'self_deactivated',
+        message: 'Sizning akkauntingiz o\'chirilgan',
+      });
+    }
+
     if (!teacher.isActive) {
-      return res.status(403).json({ error: 'Akkauntingiz bloklangan. Admin bilan bog\'laning' });
+      return res.status(403).json({ error: 'Akkauntingiz bloklangan' });
     }
 
     const isValid = await teacher.comparePassword(password);
@@ -71,42 +65,20 @@ exports.teacherLogin = async (req, res) => {
       return res.status(401).json({ error: 'Email yoki parol noto\'g\'ri' });
     }
 
-    const Class = require('../models/Class');
-    const Subscription = require('../models/Subscription');
-
-    const teacherClass = await Class.findOne({ teacher: teacher._id });
-
-    if (teacherClass) {
-      const subscription = await Subscription.findOne({ class: teacherClass._id });
-
-      if (subscription && (subscription.isExpired() || !subscription.isActive)) {
-        return res.status(403).json({
-          error: 'subscription_expired',
-          message: 'Iltimos to\'lov qiling. Obunangiz tugagan.',
-        });
-      }
-
-      if (subscription && subscription.selfDeactivated) {
-        return res.status(403).json({
-          error: 'self_deactivated',
-          message: 'Sinf o\'chirilgan. Admin bilan bog\'laning.',
-        });
-      }
+    // YANGI: Subscription tekshirish (TEACHER UCHUN!)
+    if (!teacher.subscriptionIsActive || teacher.isSubscriptionExpired()) {
+      return res.status(403).json({
+        error: 'subscription_expired',
+        message: 'Saytdan foydalanish vaqtingiz tugadi. Iltimos to\'lov qiling',
+        daysLeft: teacher.daysLeftInSubscription(),
+      });
     }
-
-    await teacher.updateLastLogin();
 
     const token = generateToken({ id: teacher._id, email: teacher.email, role: 'teacher' });
 
     res.json({
-      message: 'Muvaffaqiyatli kirish',
       token,
-      user: {
-        id: teacher._id,
-        name: teacher.name,
-        email: teacher.email,
-        role: 'teacher',
-      },
+      user: { id: teacher._id, name: teacher.name, email: teacher.email, role: 'teacher' },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -124,18 +96,9 @@ exports.getMe = async (req, res) => {
       user = await Teacher.findById(id).select('-password');
     }
 
-    if (!user) {
-      return res.status(404).json({ error: 'Foydalanuvchi topilmadi' });
-    }
+    if (!user) return res.status(404).json({ error: 'Foydalanuvchi topilmadi' });
 
-    res.json({
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role,
-      },
-    });
+    res.json({ user: { ...user.toObject(), role } });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

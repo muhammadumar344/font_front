@@ -1,37 +1,60 @@
-// ============================================================================
-// FILE: src/models/Teacher.js
-// ============================================================================
-
-const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
-
+// models/Teacher.js
 const teacherSchema = new mongoose.Schema({
   name: {
     type: String,
     required: [true, 'Ism majburiy'],
     trim: true,
+    minlength: [3, 'Ism kamida 3 belgidan iborat bo\'lishi kerak'],
   },
   email: {
     type: String,
     required: [true, 'Email majburiy'],
     unique: true,
     lowercase: true,
-    match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Email to\'g\'ri formatda emas'],
+    match: [
+      /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+      'Email to\'g\'ri formatda emas',
+    ],
   },
   password: {
     type: String,
     required: [true, 'Parol majburiy'],
+    minlength: [6, 'Parol kamita 6 belgidan iborat bo\'lishi kerak'],
     select: false,
   },
   phone: String,
-  createdByAdmin: {
+  
+  // YANGI: Teacher qaysi planni tanlagan
+  plan: {
+    type: String,
+    enum: ['free', 'plus', 'pro'],
+    default: 'free',
+  },
+  
+  // YANGI: Subscription ma'lumotlari (teacher uchun)
+  subscriptionStartDate: Date,
+  subscriptionExpiryDate: Date,
+  subscriptionIsActive: {
     type: Boolean,
     default: true,
   },
+  
+  // YANGI: Self deactivate (o'zi rad etdi)
+  selfDeactivated: {
+    type: Boolean,
+    default: false,
+  },
+  
   isActive: {
     type: Boolean,
     default: true,
   },
+  
+  createdByAdmin: {
+    type: Boolean,
+    default: true,
+  },
+  
   lastLogin: Date,
   createdAt: {
     type: Date,
@@ -39,43 +62,28 @@ const teacherSchema = new mongoose.Schema({
   },
 });
 
+// Metodlar
 teacherSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) {
+  if (!this.isModified('password')) return next();
+  if (this.password.startsWith('$2a$') || this.password.startsWith('$2b$')) {
     return next();
   }
-
-  try {
-    if (this.password.startsWith('$2a$') || this.password.startsWith('$2b$')) {
-      return next();
-    }
-
-    const salt = await bcrypt.genSalt(10);
-    this.password = await bcrypt.hash(this.password, salt);
-    next();
-  } catch (err) {
-    next(err);
-  }
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
+  next();
 });
 
 teacherSchema.methods.comparePassword = async function (password) {
-  try {
-    return await bcrypt.compare(password, this.password);
-  } catch (err) {
-    throw new Error('Password tekshirishda xato');
-  }
+  return await bcrypt.compare(password, this.password);
 };
 
-teacherSchema.methods.updateLastLogin = async function () {
-  this.lastLogin = new Date();
-  return await this.save();
+teacherSchema.methods.isSubscriptionExpired = function () {
+  return new Date() > this.subscriptionExpiryDate;
 };
 
-teacherSchema.post('save', function (err, doc, next) {
-  if (err.name === 'MongoServerError' && err.code === 11000) {
-    next(new Error('Bu email allaqachon ro\'yxatdan o\'tgan'));
-  } else {
-    next(err);
-  }
-});
+teacherSchema.methods.daysLeftInSubscription = function () {
+  const diff = this.subscriptionExpiryDate - new Date();
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+};
 
 module.exports = mongoose.model('Teacher', teacherSchema);

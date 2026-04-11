@@ -1,9 +1,4 @@
-// ============================================================================
-// FILE: src/models/Class.js
-// ============================================================================
-
-const mongoose = require('mongoose');
-
+// models/Class.js
 const classSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -13,26 +8,33 @@ const classSchema = new mongoose.Schema({
   teacher: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Teacher',
-    required: [true, 'Teacher majburiy'],
+    required: true,
   },
   description: String,
-  isActive: {
-    type: Boolean,
-    default: true,
-  },
+  
+  // YANGI: Subscription O'Z TEACHER UCHUN (CLASS UCHUN EMAS)
+  // Class qanday planli teacher tomonidan yaratilgan
   plan: {
     type: String,
     enum: ['free', 'plus', 'pro'],
     default: 'free',
   },
+  
   defaultPaymentAmount: {
     type: Number,
     default: 0,
   },
+  
   isAmountConfigured: {
     type: Boolean,
     default: false,
   },
+  
+  isActive: {
+    type: Boolean,
+    default: true,
+  },
+  
   createdAt: {
     type: Date,
     default: Date.now,

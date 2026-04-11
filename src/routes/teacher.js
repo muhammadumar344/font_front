@@ -1,30 +1,23 @@
-const express = require('express')
-const router = express.Router()
-const teacherController = require('../controllers/teacherController')
-const expenseController = require('../controllers/expenseController')
-const authMiddleware = require('../middleware/authMiddleware')
-const subscriptionMiddleware = require('../middleware/subscriptionMiddleware')
+const express = require('express');
+const router = express.Router();
+const teacherController = require('../controllers/teacherController');
+const authMiddleware = require('../middleware/authMiddleware');
 
-router.use(authMiddleware)
+router.use(authMiddleware);
 
-// ─── SETUP ────────────────────────────────────────────────────────────────
-router.get('/amount-check', teacherController.checkAmountConfigured)
-router.post('/set-amount', teacherController.setDefaultAmount)
+// Sinflar
+router.post('/classes', teacherController.createClass);
+router.get('/classes', teacherController.getMyClasses);
+router.put('/classes/:classId', teacherController.updateMyClass);
+router.delete('/classes/:classId', teacherController.deleteMyClass);
 
-// ─── DASHBOARD ────────────────────────────────────────────────────────────
-router.get('/dashboard', subscriptionMiddleware, teacherController.getTeacherDashboard)
+// Default summa
+router.post('/classes/:classId/set-amount', teacherController.setDefaultAmount);
 
-// ─── HISOBOT ─────────────────────────────────────────────────────────────
-router.get('/report', subscriptionMiddleware, teacherController.getMyClassReport)
+// Dashboard
+router.get('/dashboard', teacherController.getTeacherDashboard);
 
-// ─── TO'LOVLAR ────────────────────────────────────────────────────────────
-router.post('/payments/create', subscriptionMiddleware, teacherController.createMonthlyPaymentsForMyClass)
-router.put('/payments/:paymentId/status', subscriptionMiddleware, teacherController.updateMyPaymentStatus)
+// Plan tanlash
+router.post('/select-plan', teacherController.selectPlan);
 
-// ─── XARAJATLAR ───────────────────────────────────────────────────────────
-router.post('/expenses', subscriptionMiddleware, expenseController.createExpense)
-router.get('/expenses', subscriptionMiddleware, expenseController.getExpensesByMonth)
-router.get('/expenses/yearly', subscriptionMiddleware, expenseController.getYearlySummary)
-router.delete('/expenses/:expenseId', subscriptionMiddleware, expenseController.deleteExpense)
-
-module.exports = router
+module.exports = router;
