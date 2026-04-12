@@ -1,35 +1,44 @@
-// backend/src/routes/teacher.js
+// src/routes/teacher.js
 const express = require('express');
-const teacherController = require('../controllers/teacherController');
-const auth = require('../middleware/auth');
-const teacherRole = require('../middleware/roles');
-
 const router = express.Router();
+const ctrl = require('../controllers/teacherController');
+const auth = require('../middleware/auth');
+const roles = require('../middleware/roles');
 
-router.use(auth, teacherRole('teacher'));
+router.use(auth, roles('teacher'));
 
-// Classes
-router.post('/classes', teacherController.createClass);
-router.get('/classes', teacherController.getMyClasses);
-router.put('/classes/:classId/amount', teacherController.updateClassDefaultAmount);
-router.delete('/classes/:classId', teacherController.deleteClass);
+// ── Dashboard ────────────────────────────────────────────────
+router.get('/dashboard', ctrl.getDashboard);
 
-// Students
-router.post('/classes/:classId/students', teacherController.addStudent);
-router.get('/classes/:classId/students', teacherController.getClassStudents);
-router.delete('/students/:studentId', teacherController.deleteStudent);
+// ── Subscription ─────────────────────────────────────────────
+router.get('/subscription', ctrl.getSubscriptionInfo);
 
-// Payments
-router.post('/payments/create-monthly', teacherController.createMonthlyPayments);
-router.get('/payments', teacherController.getMonthlyPayments);
-router.put('/payments/:paymentId/status', teacherController.updatePaymentStatus);
+// ── Classes ──────────────────────────────────────────────────
+router.post('/classes', ctrl.createClass);
+router.get('/classes', ctrl.getMyClasses);
+router.put('/classes/:classId/amount', ctrl.updateClassDefaultAmount);
+router.delete('/classes/:classId', ctrl.deleteClass);
 
-// Expenses
-router.post('/expenses', teacherController.addExpense);
-router.get('/expenses', teacherController.getExpenses);
-router.delete('/expenses/:expenseId', teacherController.deleteExpense);
+// ── Students ─────────────────────────────────────────────────
+router.post('/classes/:classId/students', ctrl.addStudent);
+router.get('/classes/:classId/students', ctrl.getClassStudents);
+router.delete('/students/:studentId', ctrl.deleteStudent);
 
-// Dashboard
-router.get('/dashboard', teacherController.getDashboard);
+// ── Payments ─────────────────────────────────────────────────
+router.post('/payments/create-monthly', ctrl.createMonthlyPayments);
+router.get('/payments', ctrl.getMonthlyPayments);
+router.get('/payments/class/:classId', ctrl.getClassPayments);
+router.put('/payments/:paymentId/status', ctrl.updatePaymentStatus);
+router.post('/sms-reminder/send', ctrl.sendSmsReminders);
+// ── Monthly reminder (Pro/Premium) ───────────────────────────
+router.get('/reminder', ctrl.getMonthlyReminder);
+
+// ── Export (Premium) ─────────────────────────────────────────
+router.get('/export/:classId', ctrl.exportPayments);
+
+// ── Expenses ─────────────────────────────────────────────────
+router.post('/expenses', ctrl.addExpense);
+router.get('/expenses', ctrl.getExpenses);
+router.delete('/expenses/:expenseId', ctrl.deleteExpense);
 
 module.exports = router;

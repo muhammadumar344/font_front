@@ -1,4 +1,4 @@
-// backend/src/controllers/authController.js
+// src/controllers/authController.js
 const jwt = require('jsonwebtoken');
 const Admin = require('../models/Admin');
 const Teacher = require('../models/Teacher');
@@ -11,9 +11,77 @@ const generateToken = (id, role) => {
   );
 };
 
+// ✅ Setup tekshirish
+exports.checkSetup = async (req, res) => {
+  try {
+    const admin = await Admin.findOne();
+    res.json({ setupRequired: !admin });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ✅ Birinchi admin yaratish
+exports.createAdmin = async (req, res) => {
+  try {
+    const existing = await Admin.findOne();
+    if (existing) {
+      return res.status(400).json({ error: 'Admin allaqachon mavjud' });
+    }
+
+    const { name, email, password } = req.body;
+
+    // Validatsiya
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Ism majburiy' });
+    }
+
+    if (!email || !email.trim()) {
+      return res.status(400).json({ error: 'Email majburiy' });
+    }
+
+    if (!password || password.length < 6) {
+      return res.status(400).json({ error: 'Parol kamita 6 belgidan iborat bo\'lishi kerak' });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: 'Email to\'g\'ri formatda emas' });
+    }
+
+    const admin = new Admin({
+      name: name.trim(),
+      email: email.toLowerCase(),
+      password,
+    });
+
+    await admin.save();
+
+    const token = generateToken(admin._id, 'admin');
+
+    res.status(201).json({
+      message: 'Admin muvaffaqiyatli yaratildi',
+      token,
+      admin: {
+        id: admin._id,
+        name: admin.name,
+        email: admin.email,
+        role: 'admin',
+      },
+    });
+  } catch (err) {
+    if (err.code === 11000) {
+      return res.status(400).json({ error: 'Bu email allaqachon ro\'yxatdan o\'tgan' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Admin login
 exports.adminLogin = async (req, res) => {
   try {
     const { email, password } = req.body;
+
     if (!email || !password) {
       return res.status(400).json({ error: 'Email va parol majburiy' });
     }
@@ -24,18 +92,26 @@ exports.adminLogin = async (req, res) => {
     }
 
     const token = generateToken(admin._id, 'admin');
+
     res.json({
       token,
-      user: { id: admin._id, name: admin.name, email: admin.email, role: 'admin' }
+      user: {
+        id: admin._id,
+        name: admin.name,
+        email: admin.email,
+        role: 'admin',
+      },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
+// Teacher login
 exports.teacherLogin = async (req, res) => {
   try {
     const { email, password } = req.body;
+
     if (!email || !password) {
       return res.status(400).json({ error: 'Email va parol majburiy' });
     }
@@ -50,29 +126,16 @@ exports.teacherLogin = async (req, res) => {
     }
 
     const token = generateToken(teacher._id, 'teacher');
+
     res.json({
       token,
-      user: { id: teacher._id, name: teacher.name, email: teacher.email, role: 'teacher' }
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-};
-
-exports.adminRegisterTeacher = async (req, res) => {
-  try {
-    const { name, email, password, phone } = req.body;
-
-    if (await Teacher.findOne({ email })) {
-      return res.status(400).json({ error: 'Email allaqachon ro\'yxatdan o\'tgan' });
-    }
-
-    const teacher = new Teacher({ name, email, password, phone, registeredDate: new Date() });
-    await teacher.save();
-
-    res.status(201).json({
-      message: 'Teacher muvaffaqiyatli qo\'shildi',
-      teacher: { id: teacher._id, name, email, phone, plan: teacher.plan }
+      user: {
+        id: teacher._id,
+        name: teacher.name,
+        email: teacher.email,
+        role: 'teacher',
+        plan: teacher.plan,
+      },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
