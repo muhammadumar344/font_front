@@ -3,6 +3,8 @@ const Class = require('../models/Class');
 const Student = require('../models/Student');
 const MonthlyPayment = require('../models/MonthlyPayment');
 const Expense = require('../models/Expense');
+const XLSX = require('xlsx');
+const { Document, Packer, Table, TableRow, TableCell, Paragraph } = require('docx');
 const Teacher = require('../models/Teacher');
 const { PLAN_LIMITS, hasFeature, canOpenNewClass, canAddStudent } = require('../utils/planHelper');
 
@@ -611,13 +613,24 @@ exports.exportPayments = async (req, res) => {
 // ✅ EXCEL EXPORT
 const exportExcel = (res, cls, data, meta) => {
   try {
-    const XLSX = require('xlsx');
-
     const workbook = XLSX.utils.book_new();
 
+    // Data sheet
     const dataSheet = XLSX.utils.json_to_sheet(data);
-    XLSX.utils.book_append_sheet(workbook, dataSheet, 'To\'lovlar');
+    
+    // Column widths
+    dataSheet['!cols'] = [
+      { wch: 5 },   // №
+      { wch: 20 },  // O'quvchi ismi
+      { wch: 15 },  // Telefon
+      { wch: 12 },  // Summa
+      { wch: 12 },  // Holati
+      { wch: 15 }   // Sana
+    ];
+    
+    XLSX.utils.book_append_sheet(workbook, dataSheet, "To'lovlar");
 
+    // Summary sheet
     const summaryData = [
       ['Sinf nomi:', cls.name],
       ['Oy:', meta.month],
@@ -631,58 +644,55 @@ const exportExcel = (res, cls, data, meta) => {
       ['Yig\'ilgan (so\'m):', meta.collectedTotal],
       ['Qolgan (so\'m):', meta.remaining],
     ];
+    
     const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+    summarySheet['!cols'] = [{ wch: 25 }, { wch: 15 }];
     XLSX.utils.book_append_sheet(workbook, summarySheet, 'Hisobot');
 
     const fileName = `${cls.name}_${meta.month}_${meta.year}.xlsx`;
-
     const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' });
 
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${fileName}"`
-    );
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    );
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.send(buffer);
   } catch (err) {
     console.error('Excel export error:', err);
-    res.status(500).json({ error: 'Excel export xatosi' });
+    res.status(500).json({ error: 'Excel export xatosi: ' + err.message });
   }
 };
 
-// ✅ WORD EXPORT
+// ✅ WORD EXPORT - FIXED
 const exportWord = (res, cls, data, meta) => {
   try {
-    const { Document, Packer, Table, TableRow, TableCell, Paragraph, TextRun } = require('docx');
-
-    const rows = [
+    // Table rows
+    const tableRows = [
       new TableRow({
         children: [
-          new TableCell({ children: [new Paragraph('№')] }),
-          new TableCell({ children: [new Paragraph('O\'quvchi ismi')] }),
-          new TableCell({ children: [new Paragraph('Ota-ona telefoni')] }),
-          new TableCell({ children: [new Paragraph('Summa (so\'m)')] }),
-          new TableCell({ children: [new Paragraph('Holati')] }),
-          new TableCell({ children: [new Paragraph('To\'lagan sanasi')] }),
+          new TableCell({ children: [new Paragraph({ text: '№', bold: true })] }),
+          new TableCell({ children: [new Paragraph({ text: "O'quvchi ismi", bold: true })] }),
+          new TableCell({ children: [new Paragraph({ text: 'Telefon', bold: true })] }),
+          new TableCell({ children: [new Paragraph({ text: 'Summa', bold: true })] }),
+          new TableCell({ children: [new Paragraph({ text: 'Holati', bold: true })] }),
+          new TableCell({ children: [new Paragraph({ text: 'Sana', bold: true })] }),
         ],
       }),
-      ...data.map(
-        row =>
-          new TableRow({
-            children: [
-              new TableCell({ children: [new Paragraph(row['№'].toString())] }),
-              new TableCell({ children: [new Paragraph(row['O\'quvchi ismi'])] }),
-              new TableCell({ children: [new Paragraph(row['Ota-ona telefoni'])] }),
-              new TableCell({ children: [new Paragraph(row['Summa (so\'m)'].toString())] }),
-              new TableCell({ children: [new Paragraph(row['Holati'])] }),
-              new TableCell({ children: [new Paragraph(row['To\'lagan sanasi'])] }),
-            ],
-          })
-      ),
     ];
+
+    // Data rows
+    data.forEach(row => {
+      tableRows.push(
+        new TableRow({
+          children: [
+            new TableCell({ children: [new Paragraph(row['№']?.toString() || '')] }),
+            new TableCell({ children: [new Paragraph(row["O'quvchi ismi"] || '')] }),
+            new TableCell({ children: [new Paragraph(row['Ota-ona telefoni'] || '')] }),
+            new TableCell({ children: [new Paragraph(row['Summa (so\'m)']?.toString() || '')] }),
+            new TableCell({ children: [new Paragraph(row['Holati'] || '')] }),
+            new TableCell({ children: [new Paragraph(row['To\'lagan sanasi'] || '')] }),
+          ],
+        })
+      );
+    });
 
     const doc = new Document({
       sections: [
@@ -694,42 +704,62 @@ const exportWord = (res, cls, data, meta) => {
               size: 28,
             }),
             new Paragraph({ text: '' }),
-
-            new Paragraph(`Oy: ${meta.month}, Yil: ${meta.year}`),
-            new Paragraph(`Jami o'quvchilar: ${data.length}`),
-            new Paragraph(`To'lagan: ${meta.paidCount}`),
-            new Paragraph(`To'lamagan: ${data.length - meta.paidCount}`),
+            new Paragraph({
+              text: `Oy: ${meta.month}, Yil: ${meta.year}`,
+              size: 20,
+            }),
+            new Paragraph({
+              text: `Jami o'quvchilar: ${data.length}`,
+              size: 20,
+            }),
+            new Paragraph({
+              text: `To'lagan: ${meta.paidCount}`,
+              size: 20,
+            }),
+            new Paragraph({
+              text: `To'lamagan: ${data.length - meta.paidCount}`,
+              size: 20,
+            }),
             new Paragraph({ text: '' }),
-
-            new Paragraph(`Jami kutilayotgan (so'm): ${meta.expectedTotal}`),
-            new Paragraph(`Yig'ilgan (so'm): ${meta.collectedTotal}`),
-            new Paragraph(`Qolgan (so'm): ${meta.remaining}`),
+            new Paragraph({
+              text: `Jami kutilayotgan: ${meta.expectedTotal} so'm`,
+              size: 20,
+              bold: true,
+            }),
+            new Paragraph({
+              text: `Yig'ilgan: ${meta.collectedTotal} so'm`,
+              size: 20,
+              bold: true,
+            }),
+            new Paragraph({
+              text: `Qolgan: ${meta.remaining} so'm`,
+              size: 20,
+              bold: true,
+            }),
             new Paragraph({ text: '' }),
-
             new Table({
-              rows: rows,
+              rows: tableRows,
+              width: { size: 100, type: 'auto' },
             }),
           ],
         },
       ],
     });
 
-    Packer.toBuffer(doc).then(buffer => {
-      const fileName = `${cls.name}_${meta.month}_${meta.year}.docx`;
-
-      res.setHeader(
-        'Content-Disposition',
-        `attachment; filename="${fileName}"`
-      );
-      res.setHeader(
-        'Content-Type',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-      );
-      res.send(buffer);
-    });
+    Packer.toBuffer(doc)
+      .then(buffer => {
+        const fileName = `${cls.name}_${meta.month}_${meta.year}.docx`;
+        res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        res.send(buffer);
+      })
+      .catch(err => {
+        console.error('Word Packer error:', err);
+        res.status(500).json({ error: 'Word export xatosi: ' + err.message });
+      });
   } catch (err) {
     console.error('Word export error:', err);
-    res.status(500).json({ error: 'Word export xatosi' });
+    res.status(500).json({ error: 'Word export xatosi: ' + err.message });
   }
 };
 
