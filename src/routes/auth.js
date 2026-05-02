@@ -1,16 +1,11 @@
-// src/routes/auth.js
-const express = require('express');
-const authController = require('../controllers/authController');
-const router = express.Router();
+const express = require('express')
+const authController = require('../controllers/authController')
+const router = express.Router()
 
-// ✅ Setup endpoint (birinchi admin yaratish)
-router.post('/setup', authController.createAdmin);
+router.get('/setup/check', authController.checkSetup)
+router.post('/setup', authController.createAdmin)
 
-// ✅ Setup tekshirish
-router.get('/setup/check', authController.checkSetup);
+router.post('/admin/login', authController.adminLogin)
+router.post('/teacher/login', authController.teacherLogin)
 
-// Login endpointlari
-router.post('/admin/login', authController.adminLogin);
-router.post('/teacher/login', authController.teacherLogin);
-
-module.exports = router;
+module.exports = router

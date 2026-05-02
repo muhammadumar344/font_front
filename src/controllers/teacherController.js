@@ -7,7 +7,6 @@ const Teacher = require('../models/Teacher')
 const XLSX = require('xlsx')
 const { Document, Packer, Table, TableRow, TableCell, Paragraph, TextRun, WidthType, AlignmentType } = require('docx')
 const { PLAN_LIMITS, hasFeature, canOpenNewClass, canAddStudent } = require('../utils/planHelper')
-const smsService = require('../services/smsService')
 
 // ============================================================
 //  CLASSES
@@ -761,41 +760,6 @@ exports.getMonthlyReminder = async (req, res) => {
 //  SMS REMINDER
 // ============================================================
 
-exports.sendSmsReminders = async (req, res) => {
-  try {
-    const { classId, month, year } = req.body
-    const teacherId = req.user.id
-
-    const teacher = await Teacher.findById(teacherId)
-    if (!teacher) return res.status(404).json({ success: false, error: 'Teacher topilmadi' })
-    if (!hasFeature(teacher, 'sms_reminder')) {
-      return res.status(403).json({ success: false, error: 'SMS reminder faqat Premium uchun', requiresUpgrade: true })
-    }
-
-    const cls = await Class.findOne({ _id: classId, teacher: teacherId })
-    if (!cls) return res.status(404).json({ success: false, error: 'Sinf topilmadi' })
-
-    const payments = await MonthlyPayment.find({ class: classId, month: Number(month), year: Number(year), status: 'not_paid' })
-      .populate('student', 'name parentPhone rollNumber')
-
-    if (payments.length === 0) {
-      return res.json({ success: true, message: "SMS yuborilmaydigan o'quvchi yo'q", summary: { total: 0, sent: 0, failed: 0 } })
-    }
-
-    const studentsToNotify = payments.map((p) => ({
-      _id: p.student._id, name: p.student.name, parentPhone: p.student.parentPhone, amount: p.amount,
-    }))
-
-    const results = await smsService.sendBulkReminders(studentsToNotify, cls.name, month, year)
-    const successCount = results.filter((r) => r.status === 'sent').length
-    const failedCount = results.filter((r) => r.status === 'failed').length
-
-    res.json({ success: true, message: 'SMS reminder yuborildi', summary: { total: results.length, sent: successCount, failed: failedCount }, details: results })
-  } catch (err) {
-    console.error('sendSmsReminders error:', err)
-    res.status(500).json({ success: false, error: err.message })
-  }
-}
 
 // ============================================================
 //  EXPORT
