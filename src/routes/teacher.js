@@ -38,7 +38,7 @@ router.put('/payments/:paymentId/status',           ctrl.updatePaymentStatus)
 router.get('/reminder',                             ctrl.getMonthlyReminder)
 
 // ── SMS Reminder (Premium) ────────────────────────────────────
-router.post('/sms-reminder/send',                   ctrl.sendSmsReminders)
+// router.post('/sms-reminder/send',                   ctrl.sendSmsReminders)
 
 // ── Export (Premium) ──────────────────────────────────────────
 router.get('/export/:classId',                      ctrl.exportPayments)

@@ -1,58 +1,62 @@
-// server.js — VAQTINCHA DIAGNOSTIKA (keyin o'chiring)
+// src/server.js
 require('dotenv').config()
 const express = require('express')
 const mongoose = require('mongoose')
 const cors = require('cors')
 
 const app = express()
-app.use(cors())
+
+// ── Middleware ─────────────────────────────────────────────────
+app.use(cors({
+  origin: process.env.FRONTEND_URL || '*',
+  credentials: true,
+}))
 app.use(express.json())
+app.use(express.urlencoded({ extended: true }))
 
-app.get('/api/health', (req, res) => res.json({ ok: true }))
+// ── Health check ───────────────────────────────────────────────
+app.get('/', (req, res) => res.json({ status: 'ok', app: 'Fond School API' }))
+app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }))
 
+// ── MongoDB ulanish ────────────────────────────────────────────
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/fond-school')
   .then(async () => {
     console.log('✅ MongoDB ulandi')
 
-    // ── Bot ──────────────────────────────────────────────────
-    try {
-      const { initBot } = require('./src/bot/bot')
-      initBot(app)
-      console.log('✅ Bot yuklandi')
-    } catch (e) { console.error('❌ Bot xatosi:', e.message) }
+    // ✅ 1-qadam: Botni ishga tushirish (routes dan OLDIN)
+    const { initBot } = require('./src/bot/bot')
+    initBot(app)   // app — webhook uchun kerak
 
-    // ── Auth routes ──────────────────────────────────────────
-    try {
-      const authRoutes = require('./src/routes/auth')
-      app.use('/api/auth', authRoutes)
-      console.log('✅ auth routes ulandi')
-    } catch (e) { console.error('❌ auth routes xatosi:', e.message) }
+    // ✅ 2-qadam: Routelarni ulash
+    app.use('/api/auth',    require('./src/routes/auth'))
+    app.use('/api/admin',   require('./src/routes/admin'))
+    app.use('/api/teacher', require('./src/routes/teacher'))
 
-    // ── Admin routes ─────────────────────────────────────────
-    try {
-      const adminRoutes = require('./src/routes/admin')
-      app.use('/api/admin', adminRoutes)
-      console.log('✅ admin routes ulandi')
-    } catch (e) { console.error('❌ admin routes xatosi:', e.message) }
+    // 404 handler
+    app.use((req, res) => {
+      res.status(404).json({ error: `Route topilmadi: ${req.method} ${req.originalUrl}` })
+    })
 
-    // ── Teacher routes ────────────────────────────────────────
-    try {
-      const teacherRoutes = require('./src/routes/teacher')
-      app.use('/api/teacher', teacherRoutes)
-      console.log('✅ teacher routes ulandi')
-    } catch (e) { console.error('❌ teacher routes xatosi:', e.message) }
+    // Global error handler
+    app.use((err, req, res, next) => {
+      console.error('Server xatosi:', err.message)
+      res.status(500).json({ error: 'Ichki server xatosi' })
+    })
 
-    // ── Cron ─────────────────────────────────────────────────
-    try {
-      const { startReminderCron } = require('./src/cron/reminderCron')
-      startReminderCron()
-      console.log('✅ Cron ishga tushdi')
-    } catch (e) { console.error('❌ Cron xatosi:', e.message) }
+    // ✅ 3-qadam: Cron job (eslatmalar)
+    const { startReminderCron } = require('./src/cron/reminderCron')
+    startReminderCron()
 
+    // ✅ 4-qadam: Serverni ishga tushirish
     const PORT = process.env.PORT || 5000
-    app.listen(PORT, () => console.log(`🚀 Server ${PORT} portda`))
+    app.listen(PORT, () => {
+      console.log(`🚀 Server http://localhost:${PORT} da ishlamoqda`)
+      console.log(`🌍 NODE_ENV: ${process.env.NODE_ENV || 'development'}`)
+    })
   })
-  .catch(err => {
-    console.error('❌ MongoDB xatosi:', err.message)
+  .catch((err) => {
+    console.error('❌ MongoDB ulanish xatosi:', err.message)
     process.exit(1)
   })
+
+module.exports = app
