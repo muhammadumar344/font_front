@@ -1,43 +1,58 @@
-// backend/server.js
-require('dotenv').config();
-const express = require('express');
-const mongoose = require('mongoose');
-const cors = require('cors');
+// server.js — VAQTINCHA DIAGNOSTIKA (keyin o'chiring)
+require('dotenv').config()
+const express = require('express')
+const mongoose = require('mongoose')
+const cors = require('cors')
 
-const app = express();
+const app = express()
+app.use(cors())
+app.use(express.json())
 
-app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.get('/api/health', (req, res) => res.json({ ok: true }))
 
-// ✅ Routes
-app.use('/api/auth', require('./src/routes/auth'));
-app.use('/api/admin', require('./src/routes/admin'));
-app.use('/api/teacher', require('./src/routes/teacher'));
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/fond-school')
+  .then(async () => {
+    console.log('✅ MongoDB ulandi')
 
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK' });
-});
+    // ── Bot ──────────────────────────────────────────────────
+    try {
+      const { initBot } = require('./src/bot/bot')
+      initBot(app)
+      console.log('✅ Bot yuklandi')
+    } catch (e) { console.error('❌ Bot xatosi:', e.message) }
 
-// Error handler
-app.use((err, req, res, next) => {
-  console.error('Error:', err);
-  res.status(500).json({ error: 'Server xatosi' });
-});
+    // ── Auth routes ──────────────────────────────────────────
+    try {
+      const authRoutes = require('./src/routes/auth')
+      app.use('/api/auth', authRoutes)
+      console.log('✅ auth routes ulandi')
+    } catch (e) { console.error('❌ auth routes xatosi:', e.message) }
 
-const PORT = process.env.PORT || 5000;
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/school_fund';
+    // ── Admin routes ─────────────────────────────────────────
+    try {
+      const adminRoutes = require('./src/routes/admin')
+      app.use('/api/admin', adminRoutes)
+      console.log('✅ admin routes ulandi')
+    } catch (e) { console.error('❌ admin routes xatosi:', e.message) }
 
-mongoose.connect(MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-}).then(() => {
-  console.log('✅ MongoDB ulandi');
-  app.listen(PORT, () => {
-    console.log(`🚀 Server ${PORT} portda ishga tushdi`);
-    console.log(`📝 Setup: http://localhost:${PORT}/api/health`);
-  });
-}).catch(err => {
-  console.error('❌ MongoDB xatosi:', err);
-  process.exit(1);
-});
+    // ── Teacher routes ────────────────────────────────────────
+    try {
+      const teacherRoutes = require('./src/routes/teacher')
+      app.use('/api/teacher', teacherRoutes)
+      console.log('✅ teacher routes ulandi')
+    } catch (e) { console.error('❌ teacher routes xatosi:', e.message) }
+
+    // ── Cron ─────────────────────────────────────────────────
+    try {
+      const { startReminderCron } = require('./src/cron/reminderCron')
+      startReminderCron()
+      console.log('✅ Cron ishga tushdi')
+    } catch (e) { console.error('❌ Cron xatosi:', e.message) }
+
+    const PORT = process.env.PORT || 5000
+    app.listen(PORT, () => console.log(`🚀 Server ${PORT} portda`))
+  })
+  .catch(err => {
+    console.error('❌ MongoDB xatosi:', err.message)
+    process.exit(1)
+  })

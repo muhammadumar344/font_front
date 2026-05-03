@@ -1,76 +1,57 @@
-// backend/src/cron/reminderCron.js
+// src/cron/reminderCron.js
 const cron = require('node-cron')
 const TelegramParent = require('../models/TelegramParent')
 const MonthlyPayment = require('../models/MonthlyPayment')
 const { sendPaymentReminder } = require('../services/telegramService')
 
-/**
- * Oldingi oyni hisoblash
- */
+const MONTH_NAMES = [
+  'Yanvar','Fevral','Mart','Aprel','May','Iyun',
+  'Iyul','Avgust','Sentabr','Oktabr','Noyabr','Dekabr',
+]
+
 const getPreviousMonth = () => {
   const now = new Date()
-  let month = now.getMonth() // 0-indexed, shuning uchun oldingi oy
+  let month = now.getMonth() // 0-indexed = oldingi oy
   let year = now.getFullYear()
-
-  if (month === 0) {
-    month = 12
-    year -= 1
-  }
-
+  if (month === 0) { month = 12; year -= 1 }
   return { month, year }
 }
 
-/**
- * Barcha ulangan ota-onalarga eslatma yuborish
- */
 const sendMonthlyReminders = async () => {
   console.log('📬 Oylik Telegram eslatma boshlandi...')
-
   try {
     const parents = await TelegramParent.find({ isActive: true })
       .populate('studentId', 'name')
       .populate('classId', 'name')
 
-    if (parents.length === 0) {
+    if (!parents.length) {
       console.log('📭 Ulangan ota-ona yo\'q')
       return
     }
 
-    const { month, year } = getPreviousMonth()
     let sentCount = 0
     let skippedCount = 0
 
     for (const parent of parents) {
       try {
-        // Bu student uchun to'lanmagan oylarni topish (oxirgi 3 oy)
+        if (!parent.studentId || !parent.classId) continue
+
+        // Oxirgi 3 oyda to'lanmagan to'lovlar
         const unpaidPayments = await MonthlyPayment.find({
           student: parent.studentId._id,
           status: 'not_paid',
-          // Oxirgi 3 oyni tekshirish
-          $or: [
-            { year, month: { $lte: month } },
-            { year: year - 1, month: { $gt: month } },
-          ],
-        }).sort({ year: 1, month: 1 })
+        }).sort({ year: 1, month: 1 }).limit(3)
 
-        if (unpaidPayments.length === 0) {
-          skippedCount++
-          continue
-        }
+        if (!unpaidPayments.length) { skippedCount++; continue }
 
         const sent = await sendPaymentReminder(
           parent.telegramChatId,
           parent.studentId.name,
           parent.classId.name,
-          unpaidPayments.map((p) => ({
-            month: p.month,
-            year: p.year,
-            amount: p.amount,
-          }))
+          unpaidPayments.map((p) => ({ month: p.month, year: p.year, amount: p.amount }))
         )
 
         if (sent) {
-          // Oxirgi bildirishni saqlash
           parent.lastNotifiedAt = new Date()
           await parent.save()
           sentCount++
@@ -80,25 +61,16 @@ const sendMonthlyReminders = async () => {
       }
     }
 
-    console.log(`✅ Telegram eslatma: ${sentCount} ta yuborildi, ${skippedCount} ta o'tkazib yuborildi`)
+    console.log(`✅ Telegram: ${sentCount} yuborildi, ${skippedCount} o'tkazildi`)
   } catch (err) {
     console.error('sendMonthlyReminders xatosi:', err)
   }
 }
 
-/**
- * Cron job ishga tushirish
- * Har oyning 1-sanasi, soat 09:00 da ishlaydi
- */
 const startReminderCron = () => {
-  // '0 9 1 * *' = Har oy 1-sana, 09:00
-  cron.schedule('0 9 1 * *', async () => {
-    await sendMonthlyReminders()
-  }, {
-    timezone: 'Asia/Tashkent',
-  })
-
-  console.log('⏰ Oylik eslatma cron job ishga tushdi (har oy 1-sana, 09:00)')
+  // Har oy 1-sana soat 09:00 (Toshkent vaqti)
+  cron.schedule('0 9 1 * *', sendMonthlyReminders, { timezone: 'Asia/Tashkent' })
+  console.log('⏰ Oylik eslatma cron ishga tushdi (1-sana, 09:00 Toshkent)')
 }
 
 module.exports = { startReminderCron, sendMonthlyReminders }
