@@ -50,7 +50,7 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/fond-scho
     // ✅ 4-qadam: Serverni ishga tushirish
     const PORT = process.env.PORT || 5000
     app.listen(PORT, () => {
-      console.log(`🚀 Server http://localhost:${PORT} da `)
+      console.log(`🚀 Server http://localhost:${PORT} da ishlamoqda`)
       console.log(`🌍 NODE_ENV: ${process.env.NODE_ENV || 'development'}`)
     })
   })
