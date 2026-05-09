@@ -1,5 +1,5 @@
 // src/controllers/freezeController.js
-const FreezeSettings = require('../models/FreezeSettings')
+const FreezeSettings = require('../models/freezesettings')
 const Teacher = require('../models/Teacher')
 const TelegramParent = require('../models/TelegramParent')
 const {
