@@ -1,12 +1,15 @@
-// backend/src/controllers/teacherController.js
+// src/controllers/teacherController.js
 const Class = require('../models/Class')
 const Student = require('../models/Student')
 const MonthlyPayment = require('../models/MonthlyPayment')
 const Expense = require('../models/Expense')
 const Teacher = require('../models/Teacher')
+const TelegramParent = require('../models/TelegramParent')
 const XLSX = require('xlsx')
 const { Document, Packer, Table, TableRow, TableCell, Paragraph, TextRun, WidthType, AlignmentType } = require('docx')
 const { PLAN_LIMITS, hasFeature, canOpenNewClass, canAddStudent } = require('../utils/planHelper')
+const smsService = require('../services/smsService')
+const { sendPaymentConfirmation } = require('../services/telegramService')
 
 // ============================================================
 //  CLASSES
@@ -466,27 +469,56 @@ exports.updatePaymentStatus = async (req, res) => {
     const { status } = req.body
     const teacherId = req.user.id
 
-    if (!['paid', 'not_paid'].includes(status)) {
+    if (!["paid", "not_paid"].includes(status)) {
       return res.status(400).json({ success: false, error: "Status 'paid' yoki 'not_paid' bo'lishi kerak" })
     }
 
-    const payment = await MonthlyPayment.findById(paymentId).populate('class')
+    const payment = await MonthlyPayment.findById(paymentId).populate("class")
     if (!payment) {
       return res.status(404).json({ success: false, error: "To'lov topilmadi" })
     }
-
     if (payment.class.teacher.toString() !== teacherId) {
       return res.status(403).json({ success: false, error: "Ruxsat yo'q" })
     }
 
-    payment.status = status
-    payment.paidDate = status === 'paid' ? new Date() : null
+    payment.status   = status
+    payment.paidDate = status === "paid" ? new Date() : null
     await payment.save()
-    await payment.populate('student', 'name parentPhone rollNumber')
+    await payment.populate("student", "name parentPhone rollNumber")
 
-    res.json({ success: true, message: 'Status yangilandi', payment })
+    // ✅ TO'LOV QILINGANDA TELEGRAM XABARI
+    if (status === "paid") {
+      try {
+        const tgParent = await TelegramParent.findOne({
+          studentId: payment.student._id,
+          isActive: true,
+        })
+
+        if (tgParent) {
+          const remainingPayments = await MonthlyPayment.find({
+            student: payment.student._id,
+            status: "not_paid",
+          }).sort({ year: 1, month: 1 })
+
+          await sendPaymentConfirmation(
+            tgParent.telegramChatId,
+            payment.student.name,
+            payment.class.name,
+            [{ month: payment.month, year: payment.year }],
+            remainingPayments.map(p => ({ month: p.month, year: p.year, amount: p.amount }))
+          )
+
+          tgParent.lastNotifiedAt = new Date()
+          await tgParent.save()
+        }
+      } catch (tgErr) {
+        console.error("Telegram payment notification xatosi:", tgErr.message)
+      }
+    }
+
+    res.json({ success: true, message: "Status yangilandi", payment })
   } catch (err) {
-    console.error('updatePaymentStatus error:', err)
+    console.error("updatePaymentStatus error:", err)
     res.status(500).json({ success: false, error: err.message })
   }
 }
@@ -760,6 +792,41 @@ exports.getMonthlyReminder = async (req, res) => {
 //  SMS REMINDER
 // ============================================================
 
+exports.sendSmsReminders = async (req, res) => {
+  try {
+    const { classId, month, year } = req.body
+    const teacherId = req.user.id
+
+    const teacher = await Teacher.findById(teacherId)
+    if (!teacher) return res.status(404).json({ success: false, error: 'Teacher topilmadi' })
+    if (!hasFeature(teacher, 'sms_reminder')) {
+      return res.status(403).json({ success: false, error: 'SMS reminder faqat Premium uchun', requiresUpgrade: true })
+    }
+
+    const cls = await Class.findOne({ _id: classId, teacher: teacherId })
+    if (!cls) return res.status(404).json({ success: false, error: 'Sinf topilmadi' })
+
+    const payments = await MonthlyPayment.find({ class: classId, month: Number(month), year: Number(year), status: 'not_paid' })
+      .populate('student', 'name parentPhone rollNumber')
+
+    if (payments.length === 0) {
+      return res.json({ success: true, message: "SMS yuborilmaydigan o'quvchi yo'q", summary: { total: 0, sent: 0, failed: 0 } })
+    }
+
+    const studentsToNotify = payments.map((p) => ({
+      _id: p.student._id, name: p.student.name, parentPhone: p.student.parentPhone, amount: p.amount,
+    }))
+
+    const results = await smsService.sendBulkReminders(studentsToNotify, cls.name, month, year)
+    const successCount = results.filter((r) => r.status === 'sent').length
+    const failedCount = results.filter((r) => r.status === 'failed').length
+
+    res.json({ success: true, message: 'SMS reminder yuborildi', summary: { total: results.length, sent: successCount, failed: failedCount }, details: results })
+  } catch (err) {
+    console.error('sendSmsReminders error:', err)
+    res.status(500).json({ success: false, error: err.message })
+  }
+}
 
 // ============================================================
 //  EXPORT
@@ -981,5 +1048,3 @@ exports.getSubscriptionInfo = async (req, res) => {
     res.status(500).json({ success: false, error: err.message })
   }
 }
-
-module.exports = exports
