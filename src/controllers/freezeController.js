@@ -1,78 +1,68 @@
-// src/controllers/freezeController.js
-const FreezeSettings = require('../models/freezesettings')
-const Teacher = require('../models/Teacher')
-const TelegramParent = require('../models/TelegramParent')
-const {
-  sendFreezeNotification,
-  sendUnfreezeNotification,
-} = require('../services/telegramService')
-
-const FREEZE_REASON_DEFAULT = 'Yozgi tatil (iyun-avgust)'
+// src/controllers/freezeController.js — SODDALASHTIRILGAN (Telegram yo'q)
+const FreezeSettings = require('../models/FreezeSettings')
+const Teacher        = require('../models/Teacher')
 
 // Hozirgi freeze holati
 exports.getFreezeStatus = async (req, res) => {
   try {
     const freeze = await FreezeSettings.findOne().sort({ createdAt: -1 })
-    res.json({
-      success: true,
-      freeze: freeze || null,
-      isActive: freeze?.isActive || false,
-    })
+    res.json({ success: true, freeze: freeze || null, isActive: freeze?.isActive || false })
   } catch (e) {
     res.status(500).json({ success: false, error: e.message })
   }
 }
 
-// ✅ Freeze YOQISH — barcha o'qituvchilar obunasi kuni to'xtaydi
+// Freeze tarixi
+exports.getFreezeHistory = async (req, res) => {
+  try {
+    const history = await FreezeSettings.find().sort({ createdAt: -1 }).limit(10)
+    res.json({ success: true, history })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+}
+
+// ── FREEZE YOQISH ────────────────────────────────────────────
 exports.activateFreeze = async (req, res) => {
   try {
     const { reason } = req.body
-    const adminId = req.user.id
 
-    // Avvalgi aktivni o'chirish
     await FreezeSettings.updateMany({ isActive: true }, { isActive: false, endedAt: new Date() })
 
     const freeze = await FreezeSettings.create({
-      isActive: true,
+      isActive:  true,
       startedAt: new Date(),
-      reason: reason || FREEZE_REASON_DEFAULT,
-      createdBy: adminId,
+      reason:    reason || 'Yozgi tatil',
+      createdBy: req.user.id,
     })
 
-    // Barcha aktiv o'qituvchilar obunasidagi "freezeStartedAt" saqlanadi
-    const teachers = await Teacher.find({ isActive: true, plan: { $ne: 'free' } })
-    let notifiedCount = 0
+    // Pro/Premium o'qituvchilar obunasini muzlatish
+    const teachers = await Teacher.find({
+      isActive: true,
+      plan: { $ne: 'free' },
+      planExpiresAt: { $gt: new Date() },
+    })
 
-    for (const teacher of teachers) {
-      // Obuna muddatini saqlab, freeze boshlagan sanani qayd qilish
-      teacher.freezeStartedAt    = new Date()
-      teacher.freezeRemainingMs  = teacher.planExpiresAt
-        ? Math.max(0, new Date(teacher.planExpiresAt) - new Date())
-        : 0
-      await teacher.save()
-
-      // Telegram xabari
-      try {
-        const tgParent = await TelegramParent.findOne({ teacherId: teacher._id })
-        // O'qituvchi uchun alohida chat ID yo'q, lekin agar boshqa tizim bo'lsa ishlatiladi
-        // Hozircha konsolga log
-        console.log(`Freeze: ${teacher.name} (${teacher.email}) xabardor qilindi`)
-        notifiedCount++
-      } catch {}
+    let frozenCount = 0
+    for (const t of teachers) {
+      t.freezeStartedAt   = new Date()
+      t.freezeRemainingMs = Math.max(0, new Date(t.planExpiresAt) - new Date())
+      await t.save()
+      frozenCount++
     }
 
     res.json({
       success: true,
-      message: `Freeze yoqildi. ${teachers.length} ta o'qituvchi obunasi muzlatildi.`,
+      message: `Freeze yoqildi. ${frozenCount} ta ustoz muzlatildi.`,
       freeze,
-      affectedTeachers: teachers.length,
+      frozenCount,
     })
   } catch (e) {
     res.status(500).json({ success: false, error: e.message })
   }
 }
 
-// ✅ Freeze O'CHIRISH — barcha obunalar davom etadi
+// ── FREEZE O'CHIRISH ─────────────────────────────────────────
 exports.deactivateFreeze = async (req, res) => {
   try {
     const freeze = await FreezeSettings.findOne({ isActive: true })
@@ -82,48 +72,123 @@ exports.deactivateFreeze = async (req, res) => {
 
     freeze.isActive = false
     freeze.endedAt  = new Date()
-    freeze.unfreezeNotified = true
     await freeze.save()
 
-    // Muzlagan vaqtni obunaga qaytarish
+    // Obunalarni tiklash
     const teachers = await Teacher.find({
       isActive: true,
       freezeStartedAt: { $ne: null },
+      freezeRemainingMs: { $gt: 0 },
     })
 
     let restoredCount = 0
-    for (const teacher of teachers) {
-      if (teacher.freezeRemainingMs && teacher.freezeRemainingMs > 0) {
-        // Qolgan vaqtni hozirdan hisoblash
-        const newExpiry = new Date(Date.now() + teacher.freezeRemainingMs)
-        teacher.planExpiresAt     = newExpiry
-        teacher.freezeStartedAt   = null
-        teacher.freezeRemainingMs = 0
-        await teacher.save()
-        restoredCount++
-
-        console.log(`Unfreeze: ${teacher.name} — yangi muddat: ${newExpiry.toLocaleDateString('uz-UZ')}`)
-      }
+    for (const t of teachers) {
+      t.planExpiresAt     = new Date(Date.now() + t.freezeRemainingMs)
+      t.freezeStartedAt   = null
+      t.freezeRemainingMs = 0
+      await t.save()
+      restoredCount++
     }
 
     res.json({
       success: true,
-      message: `Freeze o'chirildi. ${restoredCount} ta o'qituvchi obunasi tiklandi.`,
+      message: `Freeze o'chirildi. ${restoredCount} ta ustoz tiklandi.`,
       restoredTeachers: restoredCount,
+      freezeId: freeze._id,
     })
   } catch (e) {
     res.status(500).json({ success: false, error: e.message })
   }
 }
 
-// Freeze tarixi
-exports.getFreezeHistory = async (req, res) => {
+// ── OLDINGI YIL EXPORT (Teacher uchun) ──────────────────────
+exports.exportPreviousYear = async (req, res) => {
   try {
-    const history = await FreezeSettings.find()
-      .sort({ createdAt: -1 })
-      .limit(10)
-    res.json({ success: true, history })
+    const teacherId = req.user.id
+    const { format = 'excel' } = req.query
+    const prevYear  = new Date().getFullYear() - 1
+
+    const XLSX = require('xlsx')
+    const Class = require('../models/Class')
+    const MonthlyPayment = require('../models/MonthlyPayment')
+    const Expense = require('../models/Expense')
+    const Teacher = require('../models/Teacher')
+
+    const MONTHS = ['Yanvar','Fevral','Mart','Aprel','May','Iyun','Iyul','Avgust','Sentabr','Oktabr','Noyabr','Dekabr']
+
+    const classes  = await Class.find({ teacher: teacherId })
+    const classIds = classes.map(c => c._id)
+    const teacher  = await Teacher.findById(teacherId).select('name')
+
+    if (!classes.length) {
+      return res.status(404).json({ success: false, error: 'Sinflar topilmadi' })
+    }
+
+    // Excel
+    const wb = XLSX.utils.book_new()
+
+    // 1) Yillik xulosa varag'i
+    const summaryRows = [
+      [`${teacher.name} — ${prevYear} yil Yillik Hisobot`],
+      [],
+      ['Oy', "To'lagan", "To'lamagan", "Yig'ilgan (so'm)", "Xarajat (so'm)", "Balans (so'm)"],
+    ]
+
+    let totalPaid = 0, totalExp = 0
+
+    for (let m = 1; m <= 12; m++) {
+      const payments = await MonthlyPayment.find({ class: { $in: classIds }, teacher: teacherId, year: prevYear, month: m })
+      const expenses = await Expense.find({ teacher: teacherId, year: prevYear, month: m })
+      const paidAmt  = payments.filter(p => p.status === 'paid').reduce((s, p) => s + p.amount, 0)
+      const expAmt   = expenses.reduce((s, e) => s + e.amount, 0)
+      const paidCnt  = payments.filter(p => p.status === 'paid').length
+      const unpaidCnt = payments.filter(p => p.status === 'not_paid').length
+
+      summaryRows.push([MONTHS[m - 1], paidCnt, unpaidCnt, paidAmt, expAmt, paidAmt - expAmt])
+      totalPaid += paidAmt
+      totalExp  += expAmt
+    }
+
+    summaryRows.push([], ['JAMI', '', '', totalPaid, totalExp, totalPaid - totalExp])
+    const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows)
+    wsSummary['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 18 }, { wch: 16 }, { wch: 16 }]
+    XLSX.utils.book_append_sheet(wb, wsSummary, 'Yillik xulosa')
+
+    // 2) Har oy alohida varaq
+    for (let m = 1; m <= 12; m++) {
+      const payments = await MonthlyPayment.find({ class: { $in: classIds }, teacher: teacherId, year: prevYear, month: m })
+        .populate('student', 'name rollNumber').populate('class', 'name')
+      const expenses = await Expense.find({ teacher: teacherId, year: prevYear, month: m })
+        .populate('class', 'name')
+
+      if (!payments.length && !expenses.length) continue
+
+      const rows = [
+        [`${MONTHS[m - 1]} ${prevYear}`], [],
+        ["To'lovlar:"],
+        ['№', "O'quvchi", 'Sinf', "Summa (so'm)", 'Holati'],
+        ...payments.map((p, i) => [i + 1, p.student?.name || '—', p.class?.name || '—', p.amount, p.status === 'paid' ? "To'lagan" : "To'lamagan"]),
+        [], ['Xarajatlar:'],
+        ['Sabab', 'Sinf', "Summa (so'm)"],
+        ...expenses.map(e => [e.reason, e.class?.name || '—', e.amount]),
+        [],
+        ["Jami to'langan:", payments.filter(p => p.status === 'paid').reduce((s, p) => s + p.amount, 0)],
+        ['Jami xarajat:', expenses.reduce((s, e) => s + e.amount, 0)],
+      ]
+      const ws = XLSX.utils.aoa_to_sheet(rows)
+      ws['!cols'] = [{ wch: 5 }, { wch: 22 }, { wch: 10 }, { wch: 14 }, { wch: 12 }]
+      XLSX.utils.book_append_sheet(wb, ws, MONTHS[m - 1])
+    }
+
+    const buf      = XLSX.write(wb, { bookType: 'xlsx', type: 'buffer', compression: true })
+    const fileName = encodeURIComponent(`${teacher.name}_${prevYear}_hisobot.xlsx`)
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"; filename*=UTF-8''${fileName}`)
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    res.setHeader('Content-Length', buf.length)
+    return res.end(buf)
+
   } catch (e) {
+    console.error('exportPreviousYear error:', e)
     res.status(500).json({ success: false, error: e.message })
   }
 }
