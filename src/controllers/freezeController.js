@@ -1,5 +1,5 @@
 // src/controllers/freezeController.js — SODDALASHTIRILGAN (Telegram yo'q)
-const FreezeSettings = require('../models/FreezeSettings')
+const FreezeSettings = require('../models/freezesettings')
 const Teacher        = require('../models/Teacher')
 
 // Hozirgi freeze holati
